@@ -16,9 +16,11 @@ class AndroidFocusPolicy(
             dpm.isLockTaskPermitted(context.packageName)
 
     override fun begin(allowlist: Set<String>) {
+        val manager = dpm ?: error("DevicePolicyManager unavailable")
         require(canEnforce()) { "Device Owner Lock Task is not configured" }
-        dpm.setLockTaskPackages(admin, (allowlist + context.packageName).toTypedArray())
+        manager.setLockTaskPackages(admin, (allowlist + context.packageName).toTypedArray())
         (context as? Activity)?.startLockTask()
+            ?: error("Lock Task requires an Activity context")
     }
 
     override fun end() {
