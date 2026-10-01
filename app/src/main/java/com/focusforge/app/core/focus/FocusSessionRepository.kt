@@ -22,10 +22,11 @@ class FocusSessionRepository(
         require(allowlist.isNotEmpty()) { "At least one allowed package is required" }
         require(db.focusSessionDao().getActive() == null) { "A focus session is already active" }
 
+        val nowElapsed = clock.elapsedMs()
         val entity = FocusSessionEntity(
             id = UUID.randomUUID().toString(),
             startedAtEpochMs = clock.epochMs(),
-            startedElapsedMs = clock.elapsedMs(),
+            startedElapsedMs = nowElapsed,
             state = FocusState.RUNNING.name,
             allowlist = FocusSessionConverters.encodeAllowlist(allowlist)
         )
@@ -36,15 +37,28 @@ class FocusSessionRepository(
     suspend fun pause(id: String, expectedRevision: Long): FocusSession =
         transition(id, expectedRevision, FocusState.RUNNING, FocusState.PAUSED)
 
-    suspend fun resume(id: String, expectedRevision: Long): FocusSession =
-        transition(id, expectedRevision, FocusState.PAUSED, FocusState.RUNNING)
+    suspend fun resume(id: String, expectedRevision: Long): FocusSession = mutex.withLock {
+        val current = requireCurrent(id, expectedRevision)
+        require(current.state == FocusState.PAUSED.name) {
+            "Invalid transition " + current.state + " -> RUNNING"
+        }
+        val updated = current.copy(
+            state = FocusState.RUNNING.name,
+            startedElapsedMs = clock.elapsedMs(),
+            revision = current.revision + 1
+        )
+        db.focusSessionDao().upsert(updated)
+        updated.toDomain()
+    }
 
     suspend fun end(id: String, expectedRevision: Long): FocusSession = mutex.withLock {
         val current = requireCurrent(id, expectedRevision)
         require(current.state != FocusState.ENDED.name) { "Session already ended" }
         val updated = current.copy(
             state = FocusState.ENDED.name,
-            accumulatedElapsedMs = accumulated(current, clock.elapsedMs()),
+            accumulatedElapsedMs = if (current.state == FocusState.RUNNING.name)
+                accumulated(current, clock.elapsedMs())
+            else current.accumulatedElapsedMs,
             endedAtEpochMs = clock.epochMs(),
             revision = current.revision + 1
         )
@@ -64,9 +78,7 @@ class FocusSessionRepository(
         }
         val updated = current.copy(
             state = to.name,
-            accumulatedElapsedMs = if (from == FocusState.RUNNING)
-                accumulated(current, clock.elapsedMs())
-            else current.accumulatedElapsedMs,
+            accumulatedElapsedMs = accumulated(current, clock.elapsedMs()),
             revision = current.revision + 1
         )
         db.focusSessionDao().upsert(updated)
