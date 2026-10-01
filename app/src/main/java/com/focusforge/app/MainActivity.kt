@@ -1,6 +1,8 @@
 package com.focusforge.app
 
 import android.Manifest
+import android.app.admin.DevicePolicyManager
+import android.content.ComponentName
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -24,16 +26,25 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.collectAsState
+import com.focusforge.app.core.focus.AndroidFocusPolicy
+import com.focusforge.app.core.focus.FocusAdminReceiver
 import com.focusforge.app.core.focus.FocusState
 import com.focusforge.app.core.focus.FocusViewModel
 import com.focusforge.app.core.permissions.PermissionChecker
 import com.focusforge.app.core.permissions.PermissionIntents
 import dagger.hilt.android.AndroidEntryPoint
-import androidx.compose.runtime.collectAsState
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     private val focusViewModel: FocusViewModel by viewModels()
+
+    private val focusPolicy by lazy {
+        AndroidFocusPolicy(
+            this,
+            ComponentName(this, FocusAdminReceiver::class.java)
+        )
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -51,6 +62,7 @@ class MainActivity : ComponentActivity() {
         val notificationLauncher = rememberLauncherForActivityResult(
             ActivityResultContracts.RequestPermission()
         ) { permissionState = PermissionChecker(this).current() }
+        val lockdownReady = focusPolicy.canEnforce()
 
         Column(
             Modifier.fillMaxSize().padding(24.dp),
@@ -58,16 +70,21 @@ class MainActivity : ComponentActivity() {
             verticalArrangement = Arrangement.Center
         ) {
             Text("FocusForge", style = MaterialTheme.typography.headlineLarge)
-            Text(
-                if (active == null) "Ready for a focus session"
-                else "Focus: " + active!!.state.name
-            )
+            Text(if (active == null) "Ready" else "Focus: " + active!!.state.name)
+
+            if (!lockdownReady && active == null) {
+                Text(
+                    "Lockdown is unavailable until this installation is configured as Device Owner.",
+                    modifier = Modifier.padding(top = 12.dp)
+                )
+            }
 
             if (active == null) {
                 Button(
-                    onClick = { focusViewModel.start(setOf(packageName)) },
+                    enabled = lockdownReady,
+                    onClick = { focusViewModel.start(setOf(packageName), focusPolicy) },
                     modifier = Modifier.padding(top = 16.dp)
-                ) { Text("Start Focus") }
+                ) { Text("Start Enforced Focus") }
             } else {
                 val session = active!!
                 when (session.state) {
@@ -82,7 +99,7 @@ class MainActivity : ComponentActivity() {
                     FocusState.ENDED -> Unit
                 }
                 Button(
-                    onClick = { focusViewModel.end(session) },
+                    onClick = { focusViewModel.end(session, focusPolicy) },
                     modifier = Modifier.padding(top = 8.dp)
                 ) { Text("End Focus") }
             }
