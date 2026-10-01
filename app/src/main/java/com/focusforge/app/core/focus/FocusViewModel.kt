@@ -16,14 +16,16 @@ class FocusViewModel @Inject constructor(
     val active: StateFlow<FocusSession?> = repository.observeActive()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
-    fun start(allowlist: Set<String>, policy: FocusPolicy?) = viewModelScope.launch {
-        if (policy != null) require(policy.canEnforce()) {
+    fun start(allowlist: Set<String>, policy: FocusPolicy) = viewModelScope.launch {
+        require(policy.canEnforce()) {
             "Device Owner Lock Task is required for enforced focus mode"
         }
-        runCatching {
-            val session = repository.start(allowlist)
-            if (policy != null) policy.begin(allowlist)
-            session
+        policy.begin(allowlist)
+        try {
+            repository.start(allowlist)
+        } catch (error: Throwable) {
+            policy.end()
+            throw error
         }
     }
 
@@ -35,10 +37,10 @@ class FocusViewModel @Inject constructor(
         runCatching { repository.resume(session.id, session.revision) }
     }
 
-    fun end(session: FocusSession, policy: FocusPolicy?) = viewModelScope.launch {
+    fun end(session: FocusSession, policy: FocusPolicy) = viewModelScope.launch {
         runCatching {
             val ended = repository.end(session.id, session.revision)
-            if (policy != null) policy.end()
+            policy.end()
             ended
         }
     }
