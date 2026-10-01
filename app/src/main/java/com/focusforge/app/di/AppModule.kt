@@ -3,6 +3,7 @@ package com.focusforge.app.di
 import android.content.Context
 import androidx.room.Room
 import com.focusforge.app.core.focus.FocusClock
+import com.focusforge.app.core.focus.FocusSessionRepository
 import com.focusforge.app.core.focus.SystemFocusClock
 import com.focusforge.app.data.local.FocusForgeDatabase
 import com.focusforge.app.data.local.MIGRATION_1_2
@@ -28,4 +29,10 @@ object AppModule {
 
     @Provides @Singleton
     fun focusClock(): FocusClock = SystemFocusClock()
+
+    @Provides @Singleton
+    fun focusSessionRepository(
+        database: FocusForgeDatabase,
+        clock: FocusClock
+    ): FocusSessionRepository = FocusSessionRepository(database, clock)
 }
