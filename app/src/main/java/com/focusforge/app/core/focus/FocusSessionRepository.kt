@@ -21,12 +21,11 @@ class FocusSessionRepository(
     suspend fun start(allowlist: Set<String>): FocusSession = mutex.withLock {
         require(allowlist.isNotEmpty()) { "At least one allowed package is required" }
         require(db.focusSessionDao().getActive() == null) { "A focus session is already active" }
-
-        val nowElapsed = clock.elapsedMs()
+        val now = clock.elapsedMs()
         val entity = FocusSessionEntity(
             id = UUID.randomUUID().toString(),
             startedAtEpochMs = clock.epochMs(),
-            startedElapsedMs = nowElapsed,
+            startedElapsedMs = now,
             state = FocusState.RUNNING.name,
             allowlist = FocusSessionConverters.encodeAllowlist(allowlist)
         )
@@ -57,7 +56,11 @@ class FocusSessionRepository(
         val updated = current.copy(
             state = FocusState.ENDED.name,
             accumulatedElapsedMs = if (current.state == FocusState.RUNNING.name)
-                accumulated(current, clock.elapsedMs())
+                FocusTiming.accumulated(
+                    current.accumulatedElapsedMs,
+                    current.startedElapsedMs,
+                    clock.elapsedMs()
+                )
             else current.accumulatedElapsedMs,
             endedAtEpochMs = clock.epochMs(),
             revision = current.revision + 1
@@ -78,7 +81,11 @@ class FocusSessionRepository(
         }
         val updated = current.copy(
             state = to.name,
-            accumulatedElapsedMs = accumulated(current, clock.elapsedMs()),
+            accumulatedElapsedMs = FocusTiming.accumulated(
+                current.accumulatedElapsedMs,
+                current.startedElapsedMs,
+                clock.elapsedMs()
+            ),
             revision = current.revision + 1
         )
         db.focusSessionDao().upsert(updated)
@@ -89,10 +96,6 @@ class FocusSessionRepository(
         db.focusSessionDao().get(id)?.also {
             require(it.revision == revision) { "Stale focus-session revision" }
         } ?: error("Focus session not found")
-
-    private fun accumulated(entity: FocusSessionEntity, nowElapsed: Long): Long =
-        entity.accumulatedElapsedMs +
-            (nowElapsed - entity.startedElapsedMs).coerceAtLeast(0L)
 
     private fun FocusSessionEntity.toDomain() = FocusSession(
         id = id,
